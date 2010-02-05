@@ -1,30 +1,28 @@
 require 'pathname'
 
-class Pathname
-
-  def to_fancypath
-    Fancypath.new(self)
-  end
-
-  alias_method :to_path, :to_fancypath
-
-end
-
-class String
-
-  def to_fancypath
-    Fancypath.new(self)
-  end
-
-  alias_method :to_path, :to_fancypath
-
-end
-
 class Fancypath < Pathname
+  module Helpers
+    require 'etc'
+    def to_fancypath
+      Fancypath.new to_tilde_expanded_path
+    end
+    def to_expanded_fancypath
+      Fancypath.new File.expand_path to_tilde_expanded_path
+    end
+    def to_tilde_expanded_path
+      sub(/^\~\/|^\~$/) {|_| Etc.getpwuid(Process.euid).dir.end_with('/') }
+    end
+    alias :p :to_expanded_fancypath
+  end
+
   # methods are chainable and do what you think they do
+
+  alias_method :to_str, :to_s unless method_defined? :to_str
 
   alias_method :dir, :dirname
   alias_method :directory, :dirname
+
+  alias_method :dir?, :directory?
 
   alias_method :expand, :expand_path
   alias_method :abs, :expand_path
@@ -33,8 +31,20 @@ class Fancypath < Pathname
   alias_method :exists?, :exist?
   alias_method :rename_to, :rename
 
+  def == other
+    if other.is_a? String
+      to_s == other
+    else
+      super
+    end
+  end
+
+  def length
+    to_s.length
+  end
+
   def join(path)
-    super(path).to_path
+    super(path.to_s).p
   end
 
   alias_method :/, :join
@@ -64,8 +74,22 @@ class Fancypath < Pathname
     directory? ? rmtree : delete if exist?
     self
   end
-
   alias_method :rm, :remove
+
+  def readlink
+    symlink? ? dir / super : self
+  end
+
+  def mkdir
+    require 'fileutils'
+    FileUtils.mkdir_p self
+    self
+  end
+
+  def glob expr, &block
+    Dir.glob((self / expr).to_s, &block)
+  end
+
   def write(contents, mode='wb')
     dirname.create
     open(mode) { |f| f.write contents }
@@ -79,7 +103,7 @@ class Fancypath < Pathname
 
   def move(dest)
     self.rename(dest)
-    dest.to_path
+    dest.p
   end
 
   def tail(bytes)
@@ -93,13 +117,13 @@ class Fancypath < Pathname
   alias_method :mv, :move
 
   def set_extension(ext)
-    "#{without_extension}.#{ext}".to_path
+    "#{without_extension}.#{ext}".p
   end
 
   alias_method :change_extension, :set_extension
 
   def without_extension
-    to_s[/^ (.+?) (\. ([^\.]+))? $/x, 1].to_path
+    to_s[/^ (.+?) (\. ([^\.]+))? $/x, 1].p
   end
 
   def has_extension?(ext)
@@ -107,7 +131,7 @@ class Fancypath < Pathname
   end
 
   def parent
-    super.to_path
+    super.p
   end
 
   alias_method :all_children, :children
@@ -138,10 +162,18 @@ class Fancypath < Pathname
     super.sub('Pathname','Fancypath')
   end
 
-  def to_path
+  def to_fancypath
     self
   end
 
 end
 
-def Fancypath(path); Fancypath.new(path) end
+def Fancypath path
+  Fancypath.new path
+end
+class Pathname
+  include Fancypath::Helpers
+end
+class String
+  include Fancypath::Helpers
+end
